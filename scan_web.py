@@ -238,14 +238,15 @@ os.system("clear")
 
 # ASCII banner printed at runtime
 BANNER = r"""
-             (       ) (   (               
-             )\ ) ( /( )\ ))\ )  *   )     
- (   (    ( (()/( )\()|()/(()/(` )  /((    
- )\  )\   )\ /(_)|(_)\ /(_))(_))( )(_))\   
-((_)((_) ((_|_))  _((_|_))(_)) (_(_()|(_)  
-\ \ / / | | | |  | \| / __|_ _||_   _| __| 
- \ V /| |_| | |__| .` \__ \| |   | | | _|  
-  \_/  \___/|____|_|\_|___/___|  |_| |___| 
+     ) (   (         )          )            (      (   (               
+ ( /( )\ ))\ )   ( /(       ( /(   *   )    )\ )   )\ ))\ )  *   )     
+ )\()|()/(()/(   )\())   (  )\())` )  /((  (()/(  (()/(()/(` )  /((    
+((_)\ /(_))(_)) ((_)\    )\((_)\  ( )(_))\  /(_))  /(_))(_))( )(_))\   
+__((_|_))(_))    _((_)_ ((_)_((_)(_(_()|(_)(_))   (_))(_)) (_(_()|(_)  
+\ \/ / __/ __|  | || | | | | \| ||_   _| __| _ \  / __|_ _||_   _| __| 
+ >  <\__ \__ \  | __ | |_| | .` |  | | | _||   /  \__ \| |   | | | _|  
+/_/\_\___/___/  |_||_|\___/|_|\_|  |_| |___|_|_\  |___/___|  |_| |___| 
+                                                                       
                                            
                                            
    Mr.Chainner                 v1.1     
@@ -911,7 +912,7 @@ def main():
     except Exception:
         print(BANNER)
 
-    print(color("🚨 scan_web.py — Ordered XSS then SQLi (auto-result)", C.BOLD))
+    print(color("🚨 scanxss.py — Ordered XSS then SQLi (auto-result)", C.BOLD))
     print(color("[!] WARNING: This tool sends HTTP requests. Run only on targets you are authorized to test.", C.RED))
 
     global CRAWL_ENABLED, CRAWL_PAGES, REQUEST_TIMEOUT, MAX_SQLI, MAX_XSS
