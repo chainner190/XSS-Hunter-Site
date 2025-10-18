@@ -36,7 +36,7 @@ Scan a URL without crawling (only test parameters present in the provided URL):
 python3 scan_web.py -u "http://example.com/page.php?id=1" --no-crawl
 ```
 Limit pages to crawl and reduce request timeout (helpful to avoid long stalls):
-<img src="https://i.ibb.co.com/DDwghK37/xss1.png" alt="SELF" width="500" />
+<img src="https://i.ibb.co.com/1JPYQM6H/sql-injection.png" alt="SELF" width="500" />
 ```powershell
 python3 scan_web.py -u http://example.com --crawl-pages 6 --timeout 6
 ```
