@@ -29,13 +29,13 @@ Run a normal crawl-and-scan (crawler enabled by default):
 ```powershell
 python3 scan_web.py -u http://example.com
 ```
-
+<img src="https://i.ibb.co.com/DDwghK37/xss1.png" alt="SELF" width="500" />
 Scan a URL without crawling (only test parameters present in the provided URL):
 
 ```powershell
 python3 scan_web.py -u "http://example.com/page.php?id=1" --no-crawl
 ```
-
+<img src="https://i.ibb.co.com/DDwghK37/xss2.png" alt="SELF" width="500" />
 Limit pages to crawl and reduce request timeout (helpful to avoid long stalls):
 
 ```powershell
@@ -53,7 +53,7 @@ If you prefer to avoid external CVE/CWE lookups (NVD/MITRE), disable enrichment:
 ```powershell
 python3 scan_web.py -u http://example.com --no-enrich
 ```
-<img src="https://i.ibb.co.com/DDwghK37/xss1.png" alt="SELF" width="500" />
+
 ## CLI flags (summary)
 
 - `-u`, `--url` : Target URL to scan (query string not required; crawler will discover inputs when enabled)
@@ -66,7 +66,6 @@ python3 scan_web.py -u http://example.com --no-enrich
 - `--max-xss N` : Limit number of XSS payloads to use (0 = no limit)
 
 Note: There are also internal throttling/threading controls (THREADS, REQUEST_DELAY) in the script. If you want, I can expose `--threads` and `--delay` flags to the CLI.
-<img src="https://i.ibb.co.com/hFFsVV7J/xss2.png" alt="SELF" width="500" />
 ## Output
 
 - Results are appended to `./result/<host>.txt` (a human-friendly text report). The script also prints findings to stdout in real time.
