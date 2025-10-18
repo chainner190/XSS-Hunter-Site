@@ -1,5 +1,5 @@
 # XSSHUNTER SITE — Crawl & XSS/SQLi reconnaissance tool
-<img src="https://ibb.co.com/Z6DRB83Z" alt="SELF" width="500" />
+<img src="https://i.ibb.co.com/qMQLNszZ/Chat-GPT-Image-18-Okt-2025-18-30-13.png" alt="SELF" width="500" />
 
 A small, opinionated Python tool for quickly crawling a target site (same-host), discovering input parameters, and running ordered per-parameter checks: XSS payload testing (reflected) followed by SQLi indicator testing. It validates CVE and CWE tokens it finds by querying the NVD and MITRE indexes (optional).
 
@@ -20,7 +20,7 @@ python -m pip install --user requests
 
 - `scan_web.py` — main scanner script (crawl -> XSS -> SQLi). Outputs results to `./result/<host>.txt`.
 - `README.md` — this document.
-<img src="https://i.ibb.co.com/qL59Vwrj/xss.png" alt="SELF" width="500" />
+<img src="https://i.ibb.co.com/7NW1L9cZ/xss.png" alt="SELF" width="500" />
 
 ## Quick usage
 
@@ -53,7 +53,7 @@ If you prefer to avoid external CVE/CWE lookups (NVD/MITRE), disable enrichment:
 ```powershell
 python3 scan_web.py -u http://example.com --no-enrich
 ```
-<img src="https://i.ibb.co.com/gMv7YG0p/xss2.png" alt="SELF" width="500" />
+<img src="https://i.ibb.co.com/hFFsVV7J/xss2.png" alt="SELF" width="500" />
 ## CLI flags (summary)
 
 - `-u`, `--url` : Target URL to scan (query string not required; crawler will discover inputs when enabled)
