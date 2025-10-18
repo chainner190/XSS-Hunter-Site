@@ -1,5 +1,5 @@
 # XSSHUNTER SITE — Crawl & XSS/SQLi reconnaissance tool
-<img src="https://i.ibb.co.com/DfC4gLcs/9955cf30-240f-4150-987f-f5478dcb6e31-removebg-preview.png" alt="SELF" width="500" />
+<img src="ttps://ibb.co.com/Z6DRB83Z" alt="SELF" width="500" />
 
 A small, opinionated Python tool for quickly crawling a target site (same-host), discovering input parameters, and running ordered per-parameter checks: XSS payload testing (reflected) followed by SQLi indicator testing. It validates CVE and CWE tokens it finds by querying the NVD and MITRE indexes (optional).
 
